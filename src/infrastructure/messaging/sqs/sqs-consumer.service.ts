@@ -254,7 +254,6 @@ export class SqsConsumerService implements OnApplicationShutdown {
           JSON.stringify({ msg: 'SQS message processing failed (transient)', err: String(err) }),
         );
       }
-      }
     } finally {
       this.inFlightReceiptHandle = null;
     }

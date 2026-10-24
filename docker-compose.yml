@@ -1,0 +1,133 @@
+# ---------------------------------------------------------------------------
+# Jungle Gaming — Distributed Wagering Processor
+# 100% isolated: no host dependencies required.
+#
+# Dev workflow:
+#   docker compose run --rm dev bun install
+#   docker compose run --rm dev bun test
+#
+# Full stack:
+#   docker compose up --build
+# ---------------------------------------------------------------------------
+
+x-app-env: &app-env
+  NODE_ENV: development
+  APP_PORT: 3000
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: wagering
+  POSTGRES_USER: wagering
+  POSTGRES_PASSWORD: wagering_secret
+  DATABASE_URL: postgresql://wagering:wagering_secret@postgres:5432/wagering
+  AWS_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: test
+  AWS_SECRET_ACCESS_KEY: test
+  AWS_ENDPOINT_URL: http://localstack:4566
+  SQS_QUEUE_URL: http://localstack:4566/000000000000/wager-transactions.fifo
+  SQS_DLQ_URL: http://localstack:4566/000000000000/wager-transactions-dlq.fifo
+  OUTBOX_POLL_INTERVAL_MS: 2000
+  SQS_POLL_WAIT_SECONDS: 20
+  SQS_MAX_MESSAGES: 10
+  PENDING_REFERENCE_MAX_RETRIES: 5
+  GRACEFUL_SHUTDOWN_TIMEOUT_MS: 30000
+
+services:
+  # --------------------------------------------------------------------------
+  # PostgreSQL 15
+  # --------------------------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: wagering
+      POSTGRES_USER: wagering
+      POSTGRES_PASSWORD: wagering_secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wagering -d wagering"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - wagering_net
+
+  # --------------------------------------------------------------------------
+  # LocalStack (SQS only)
+  # --------------------------------------------------------------------------
+  localstack:
+    image: localstack/localstack:latest
+    restart: unless-stopped
+    environment:
+      SERVICES: sqs
+      DEFAULT_REGION: us-east-1
+      EAGER_SERVICE_LOADING: 1
+      DEBUG: 0
+    ports:
+      - "4566:4566"
+    volumes:
+      - localstack_data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/health | grep -q '\"sqs\": \"available\"'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    networks:
+      - wagering_net
+
+  # --------------------------------------------------------------------------
+  # Application (NestJS + Bun) — production/staging
+  # --------------------------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+    networks:
+      - wagering_net
+
+  # --------------------------------------------------------------------------
+  # Dev service — Bun isolated for local development and testing.
+  # Mounts the project directory as a volume so code changes are reflected
+  # immediately without rebuilding the image.
+  #
+  # Usage:
+  #   docker compose run --rm dev bun install
+  #   docker compose run --rm dev bun test
+  #   docker compose run --rm dev bun test test/unit
+  #   docker compose run --rm dev bun run lint
+  # --------------------------------------------------------------------------
+  dev:
+    image: oven/bun:1-alpine
+    working_dir: /app
+    volumes:
+      - .:/app
+    environment:
+      <<: *app-env
+    networks:
+      - wagering_net
+
+volumes:
+  postgres_data:
+    driver: local
+  localstack_data:
+    driver: local
+
+networks:
+  wagering_net:
+    driver: bridge

@@ -1,0 +1,24 @@
+node_modules/
+dist/
+.env
+*.local
+
+# Bun
+bun.lockb
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docker volumes
+postgres_data/

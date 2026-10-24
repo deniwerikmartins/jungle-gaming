@@ -29,7 +29,7 @@ Implementação do Technical Challenge da Jungle Gaming.
 
 ```bash
 # 1. Clone o repositório
-git clone <repo-url>
+git clone https://github.com/deniwerikmartins/jungle-gaming.git
 cd jungle-gaming
 
 # 2. Suba tudo — migrations e filas SQS criadas automaticamente

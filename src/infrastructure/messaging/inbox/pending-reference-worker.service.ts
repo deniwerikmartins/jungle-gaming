@@ -54,18 +54,13 @@ export class PendingReferenceWorkerService {
     const fork = this.em.fork();
 
     await fork.transactional(async (em) => {
-      const orm = await em.findOne(
-        WagerTransactionOrmEntity,
-        { id: transactionId },
-        { populate: ['wallet'] },
-      );
+      const orm = await em.findOne(WagerTransactionOrmEntity, { id: transactionId });
 
       if (!orm) return;
 
       const tx = WagerTransactionMapper.toDomain(orm);
 
-      // Count previous attempts via a retry counter stored in failureCode metadata
-      // We use the processedAt absence as a proxy — track attempt count via DB query
+      // Count previous pending-reference outbox events as retry attempts
       const attemptCount = await em
         .getConnection()
         .execute<{ count: string }[]>(
@@ -76,7 +71,6 @@ export class PendingReferenceWorkerService {
         .then((r) => Number(r[0]?.count ?? 0));
 
       if (attemptCount >= MAX_RETRIES) {
-        // Exhaust retries → REJECTED
         this.logger.warn(
           `Transaction ${transactionId} exhausted ${MAX_RETRIES} retries → REJECTED`,
         );
@@ -92,7 +86,7 @@ export class PendingReferenceWorkerService {
           occurredAt: new Date(),
           data: {
             transactionId,
-            walletId: orm.wallet.id,
+            walletId: orm.wallet.id,  // Ref<WalletOrmEntity>.id is safe without populate
             playerId: orm.playerId,
             providerId: orm.providerId,
             externalTransactionId: orm.externalTransactionId,

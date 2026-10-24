@@ -1,3 +1,4 @@
+import { ref } from '@mikro-orm/core';
 import { WagerTransaction } from '../../../domain/wagering/entities/wager-transaction.js';
 import { WagerTransactionOrmEntity } from './wager-transaction.orm-entity.js';
 import { WalletOrmEntity } from './wallet.orm-entity.js';
@@ -37,7 +38,7 @@ export class WagerTransactionMapper {
     orm.externalTransactionId = domain.externalTransactionId;
     orm.idempotencyKey = domain.idempotencyKey;
     orm.payloadHash = domain.payloadHash;
-    orm.wallet = walletRef;
+    orm.wallet = ref(walletRef);
     orm.playerId = domain.playerId;
     orm.roundId = domain.roundId;
     orm.gameId = domain.gameId;

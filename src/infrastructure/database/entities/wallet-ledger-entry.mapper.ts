@@ -1,3 +1,4 @@
+import { ref } from '@mikro-orm/core';
 import { WalletLedgerEntry } from '../../../domain/wallet/entities/wallet-ledger-entry.js';
 import { WalletLedgerEntryOrmEntity } from './wallet-ledger-entry.orm-entity.js';
 import { WalletOrmEntity } from './wallet.orm-entity.js';
@@ -24,7 +25,7 @@ export class WalletLedgerEntryMapper {
   ): WalletLedgerEntryOrmEntity {
     const orm = new WalletLedgerEntryOrmEntity();
     orm.id = domain.id;
-    orm.wallet = walletRef;
+    orm.wallet = ref(walletRef);
     orm.transactionId = domain.transactionId;
     orm.direction = domain.direction;
     orm.moneyAmount = domain.money.toString();

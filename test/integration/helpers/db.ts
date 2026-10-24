@@ -1,13 +1,14 @@
 /**
  * Integration test helpers — shared database setup.
- *
- * Uses the same MikroORM config as the application, pointed at a real
- * PostgreSQL instance (running in Docker Compose).
  */
 import { MikroORM, EntityManager } from '@mikro-orm/postgresql';
 import { defineConfig, PostgreSqlDriver } from '@mikro-orm/postgresql';
 import { Migrator } from '@mikro-orm/migrations';
-import { TsMorphMetadataProvider } from '@mikro-orm/reflection';
+import { WalletOrmEntity } from '../../../src/infrastructure/database/entities/wallet.orm-entity.js';
+import { WalletLedgerEntryOrmEntity } from '../../../src/infrastructure/database/entities/wallet-ledger-entry.orm-entity.js';
+import { WagerTransactionOrmEntity } from '../../../src/infrastructure/database/entities/wager-transaction.orm-entity.js';
+import { InboxMessageOrmEntity } from '../../../src/infrastructure/database/entities/inbox-message.orm-entity.js';
+import { OutboxMessageOrmEntity } from '../../../src/infrastructure/database/entities/outbox-message.orm-entity.js';
 
 let orm: MikroORM | null = null;
 
@@ -22,12 +23,17 @@ export async function getTestOrm(): Promise<MikroORM> {
       dbName: process.env['POSTGRES_DB'] ?? 'wagering',
       user: process.env['POSTGRES_USER'] ?? 'wagering',
       password: process.env['POSTGRES_PASSWORD'] ?? 'wagering_secret',
-      entities: ['src/infrastructure/database/entities/*.ts'],
-      entitiesTs: ['src/infrastructure/database/entities/*.ts'],
-      metadataProvider: TsMorphMetadataProvider,
+      entities: [
+        WalletOrmEntity,
+        WalletLedgerEntryOrmEntity,
+        WagerTransactionOrmEntity,
+        InboxMessageOrmEntity,
+        OutboxMessageOrmEntity,
+      ],
       migrations: {
         pathTs: 'src/infrastructure/database/migrations',
-        glob: '!(*.d).{js,ts}',
+        // Only pick up Migration*.ts — excludes run.ts and revert.ts
+        glob: 'Migration*.{js,ts}',
         transactional: true,
         allOrNothing: true,
         snapshot: false,

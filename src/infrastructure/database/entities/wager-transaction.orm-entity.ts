@@ -6,6 +6,7 @@ import {
   Index,
   Unique,
   ManyToOne,
+  Ref,
 } from '@mikro-orm/core';
 import { WalletOrmEntity } from './wallet.orm-entity.js';
 import {
@@ -40,14 +41,9 @@ export class WagerTransactionOrmEntity {
   @Property({ fieldName: 'payload_hash', length: 64 })
   payloadHash!: string;
 
-  @ManyToOne(() => WalletOrmEntity, { fieldName: 'wallet_id', columnType: 'uuid' })
+  @ManyToOne(() => WalletOrmEntity, { fieldName: 'wallet_id', columnType: 'uuid', ref: true })
   @Index({ name: 'idx_wager_wallet_id' })
-  wallet!: WalletOrmEntity;
-
-  @Property({ fieldName: 'wallet_id', persist: false })
-  get walletId(): string {
-    return this.wallet.id;
-  }
+  wallet!: Ref<WalletOrmEntity>;
 
   @Property({ fieldName: 'player_id', columnType: 'uuid' })
   @Index({ name: 'idx_wager_player_id' })

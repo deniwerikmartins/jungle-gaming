@@ -1,6 +1,10 @@
 import { defineConfig, PostgreSqlDriver } from '@mikro-orm/postgresql';
 import { Migrator } from '@mikro-orm/migrations';
-import { TsMorphMetadataProvider } from '@mikro-orm/reflection';
+import { WalletOrmEntity } from './entities/wallet.orm-entity.js';
+import { WalletLedgerEntryOrmEntity } from './entities/wallet-ledger-entry.orm-entity.js';
+import { WagerTransactionOrmEntity } from './entities/wager-transaction.orm-entity.js';
+import { InboxMessageOrmEntity } from './entities/inbox-message.orm-entity.js';
+import { OutboxMessageOrmEntity } from './entities/outbox-message.orm-entity.js';
 
 export default defineConfig({
   driver: PostgreSqlDriver,
@@ -10,16 +14,18 @@ export default defineConfig({
   user: process.env['POSTGRES_USER'] ?? 'wagering',
   password: process.env['POSTGRES_PASSWORD'] ?? 'wagering_secret',
 
-  // Entities from infrastructure layer only — domain is ORM-free
-  entities: ['dist/infrastructure/database/entities/*.js'],
-  entitiesTs: ['src/infrastructure/database/entities/*.ts'],
-
-  metadataProvider: TsMorphMetadataProvider,
+  entities: [
+    WalletOrmEntity,
+    WalletLedgerEntryOrmEntity,
+    WagerTransactionOrmEntity,
+    InboxMessageOrmEntity,
+    OutboxMessageOrmEntity,
+  ],
 
   migrations: {
-    path: 'dist/infrastructure/database/migrations',
     pathTs: 'src/infrastructure/database/migrations',
-    glob: '!(*.d).{js,ts}',
+    // Only pick up files that follow the Migration naming convention
+    glob: 'Migration*.{js,ts}',
     transactional: true,
     allOrNothing: true,
     snapshot: false,
@@ -27,18 +33,11 @@ export default defineConfig({
 
   extensions: [Migrator],
 
-  // Connection pool tuned for concurrent load
-  pool: {
-    min: 2,
-    max: 20,
-  },
-
-  // Disable auto-flush — explicit control in use cases
+  pool: { min: 2, max: 20 },
   flushMode: 1, // FlushMode.COMMIT
 
   debug: process.env['NODE_ENV'] === 'development',
 
-  // Structured logging
   logger: (msg) => {
     if (process.env['NODE_ENV'] !== 'test') {
       process.stdout.write(JSON.stringify({ level: 'debug', msg }) + '\n');

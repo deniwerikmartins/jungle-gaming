@@ -97,12 +97,14 @@ describe('BET integration', () => {
   it('idempotent replay returns same result', async () => {
     const wallet = await createWallet('100.00');
     const extId = uuidv4();
+    // playerId must be identical in both calls — it's part of the payload hash
+    const playerId = uuidv4();
 
     const first = await makeWagerUseCase().execute({
       idempotencyKey: `provider-a:${extId}`,
       providerId: 'provider-a',
       externalTransactionId: extId,
-      playerId: uuidv4(),
+      playerId,
       walletId: wallet.id,
       roundId: 'r1',
       gameId: 'g1',
@@ -115,7 +117,7 @@ describe('BET integration', () => {
       idempotencyKey: `provider-a:${extId}`,
       providerId: 'provider-a',
       externalTransactionId: extId,
-      playerId: uuidv4(),
+      playerId,                  // same playerId — same hash
       walletId: wallet.id,
       roundId: 'r1',
       gameId: 'g1',

@@ -102,8 +102,9 @@ describe('Concurrency — 50 parallel BETs on hot wallet', () => {
     const finalBalance = (processed[0] as PromiseFulfilledResult<any>).value.balance.amount;
     expect(finalBalance).toBe('20.00');
 
-    // Verify via DB — ledger must have exactly 1 DEBIT (for the BET) + 1 CREDIT (OPENING)
-    const ledgerEntries = await em.getConnection().execute<{ direction: string; count: string }[]>(
+    // Verify via DB — use a fresh fork to avoid stale cache
+    const verifyEm = (await getTestOrm()).em.fork();
+    const ledgerEntries = await verifyEm.getConnection().execute<{ direction: string; count: string }[]>(
       `SELECT direction, COUNT(*) as count
        FROM wallet_ledger_entries
        WHERE wallet_id = ?
@@ -117,8 +118,8 @@ describe('Concurrency — 50 parallel BETs on hot wallet', () => {
     expect(Number(debitEntry?.count ?? 0)).toBe(1);   // exactly 1 debit
     expect(Number(creditEntry?.count ?? 0)).toBe(1);  // 1 credit (OPENING)
 
-    // Reconciliation must confirm consistency
-    const reconcileUc = new ReconcileWalletUseCase(em);
+    // Reconciliation must confirm consistency — fresh fork to bypass Identity Map cache
+    const reconcileUc = new ReconcileWalletUseCase(verifyEm);
     const reconcile = await reconcileUc.execute(wallet.id);
     expect(reconcile.consistent).toBe(true);
     expect(reconcile.storedBalance.amount).toBe('20.00');

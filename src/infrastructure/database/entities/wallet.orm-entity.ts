@@ -5,11 +5,7 @@ import {
   Index,
   Check,
   Unique,
-  OneToMany,
-  Collection,
 } from '@mikro-orm/core';
-import { WalletLedgerEntryOrmEntity } from './wallet-ledger-entry.orm-entity.js';
-import { WagerTransactionOrmEntity } from './wager-transaction.orm-entity.js';
 
 /**
  * ORM entity for wallets table.
@@ -17,6 +13,10 @@ import { WagerTransactionOrmEntity } from './wager-transaction.orm-entity.js';
  * Constraints enforced in schema (not just application code):
  * - UNIQUE (player_id, currency)     — one wallet per player per currency
  * - CHECK (balance_amount >= 0)      — non-negative balance invariant
+ *
+ * NOTE: OneToMany relations to ledger entries and transactions are intentionally
+ * omitted to break the ESM circular dependency cycle. All child queries use
+ * their own repositories with explicit where clauses.
  */
 @Entity({ tableName: 'wallets' })
 @Unique({ properties: ['playerId', 'currency'], name: 'uq_wallets_player_currency' })
@@ -33,8 +33,8 @@ export class WalletOrmEntity {
   currency!: string;
 
   /**
-   * Stored as NUMERIC(20, 2) — exact decimal, never float.
-   * Mapped as string in/out to preserve precision without JS number conversion.
+   * Stored as NUMERIC(20,2) — exact decimal, never float.
+   * Mapped as string to preserve precision without JS number conversion.
    */
   @Property({ fieldName: 'balance_amount', columnType: 'numeric(20,2)' })
   balanceAmount!: string;
@@ -51,10 +51,4 @@ export class WalletOrmEntity {
     onUpdate: () => new Date(),
   })
   updatedAt!: Date;
-
-  @OneToMany(() => WalletLedgerEntryOrmEntity, (e) => e.wallet)
-  ledgerEntries = new Collection<WalletLedgerEntryOrmEntity>(this);
-
-  @OneToMany(() => WagerTransactionOrmEntity, (e) => e.wallet)
-  transactions = new Collection<WagerTransactionOrmEntity>(this);
 }

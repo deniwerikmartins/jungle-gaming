@@ -1,4 +1,5 @@
-import { EntityManager, raw } from '@mikro-orm/postgresql';
+import { EntityManager } from '@mikro-orm/postgresql';
+import { ref } from '@mikro-orm/core';
 import { WalletLedgerEntry } from '../../../domain/wallet/entities/wallet-ledger-entry.js';
 import { WalletLedgerEntryOrmEntity } from '../entities/wallet-ledger-entry.orm-entity.js';
 import { WalletOrmEntity } from '../entities/wallet.orm-entity.js';
@@ -21,7 +22,7 @@ export class WalletLedgerEntryRepository {
     limit: number,
     cursor?: string,
   ): Promise<LedgerPage> {
-    const where: Record<string, unknown> = { wallet: { id: walletId } };
+    const where: Record<string, unknown> = { wallet: walletId };
 
     if (cursor) {
       const decoded = Buffer.from(cursor, 'base64').toString('utf-8');
@@ -29,7 +30,6 @@ export class WalletLedgerEntryRepository {
     }
 
     const orms = await this.em.find(WalletLedgerEntryOrmEntity, where, {
-      populate: ['wallet'],
       orderBy: { createdAt: 'DESC' },
       limit: limit + 1,
     });

@@ -5,6 +5,8 @@ import {
   ManyToOne,
   Index,
   Enum,
+  Ref,
+  ref,
 } from '@mikro-orm/core';
 import { WalletOrmEntity } from './wallet.orm-entity.js';
 import { LedgerDirection } from '../../../domain/wallet/entities/ledger-direction.enum.js';
@@ -18,14 +20,9 @@ export class WalletLedgerEntryOrmEntity {
   @PrimaryKey({ type: 'uuid', columnType: 'uuid' })
   id!: string;
 
-  @ManyToOne(() => WalletOrmEntity, { fieldName: 'wallet_id', columnType: 'uuid' })
+  @ManyToOne(() => WalletOrmEntity, { fieldName: 'wallet_id', columnType: 'uuid', ref: true })
   @Index({ name: 'idx_ledger_wallet_id' })
-  wallet!: WalletOrmEntity;
-
-  @Property({ fieldName: 'wallet_id', persist: false })
-  get walletId(): string {
-    return this.wallet.id;
-  }
+  wallet!: Ref<WalletOrmEntity>;
 
   @Property({ fieldName: 'transaction_id', columnType: 'uuid' })
   @Index({ name: 'idx_ledger_transaction_id' })

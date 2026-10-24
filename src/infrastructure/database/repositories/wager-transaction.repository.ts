@@ -40,6 +40,21 @@ export class WagerTransactionRepository {
     return orms.map(WagerTransactionMapper.toDomain);
   }
 
+  /**
+   * Checks if a PROCESSED reversal (REFUND or ROLLBACK) already exists
+   * targeting the given internal transaction ID.
+   * Used to prevent double-reversal of the same transaction.
+   */
+  async findProcessedReversalByReferenceId(
+    referenceTransactionId: string,
+  ): Promise<WagerTransaction | null> {
+    const orm = await this.em.findOne(WagerTransactionOrmEntity, {
+      referenceTransactionId,
+      status: WagerTransactionStatus.Processed,
+    });
+    return orm ? WagerTransactionMapper.toDomain(orm) : null;
+  }
+
   async save(domain: WagerTransaction, walletId: string): Promise<void> {
     const walletRef = this.em.getReference(WalletOrmEntity, walletId);
     const existing = await this.em.findOne(WagerTransactionOrmEntity, { id: domain.id });

@@ -375,3 +375,123 @@ describe('Atomicity and reconciliation', () => {
     expect(Number(count[0]?.count)).toBeGreaterThanOrEqual(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Double-reversal prevention
+// ---------------------------------------------------------------------------
+describe('Double-reversal prevention', () => {
+  it('rejects a second REFUND targeting the same BET (REFERENCE_ALREADY_REVERTED)', async () => {
+    const { ReferenceAlreadyRevertedError } = await import(
+      '../../src/shared/errors/domain.errors.js'
+    );
+    const wallet = await createWallet('200.00');
+    const betExtId = uuidv4();
+
+    // First: create the BET
+    await makeWagerUseCase().execute({
+      idempotencyKey: `provider-a:${betExtId}`,
+      providerId: 'provider-a',
+      externalTransactionId: betExtId,
+      playerId: uuidv4(),
+      walletId: wallet.id,
+      roundId: 'r1',
+      gameId: 'g1',
+      kind: WagerTransactionKind.Bet,
+      money: { amount: '50.00', currency: 'BRL' },
+      correlationId: uuidv4(),
+    });
+
+    // First REFUND — must succeed
+    const refund1ExtId = uuidv4();
+    const refund1 = await makeWagerUseCase().execute({
+      idempotencyKey: `provider-a:${refund1ExtId}`,
+      providerId: 'provider-a',
+      externalTransactionId: refund1ExtId,
+      playerId: uuidv4(),
+      walletId: wallet.id,
+      roundId: 'r1',
+      gameId: 'g1',
+      kind: WagerTransactionKind.Refund,
+      money: { amount: '50.00', currency: 'BRL' },
+      referenceExternalTransactionId: betExtId,
+      correlationId: uuidv4(),
+    });
+    expect(refund1.status).toBe(WagerTransactionStatus.Processed);
+    expect(refund1.balance.amount).toBe('200.00'); // back to original
+
+    // Second REFUND with a different externalTransactionId targeting the same BET
+    // Must be rejected as REFERENCE_ALREADY_REVERTED
+    const refund2ExtId = uuidv4();
+    const refund2 = await makeWagerUseCase().execute({
+      idempotencyKey: `provider-a:${refund2ExtId}`,
+      providerId: 'provider-a',
+      externalTransactionId: refund2ExtId,
+      playerId: uuidv4(),
+      walletId: wallet.id,
+      roundId: 'r1',
+      gameId: 'g1',
+      kind: WagerTransactionKind.Refund,
+      money: { amount: '50.00', currency: 'BRL' },
+      referenceExternalTransactionId: betExtId,
+      correlationId: uuidv4(),
+    });
+    expect(refund2.status).toBe(WagerTransactionStatus.Rejected);
+    // Balance must NOT have been credited again
+    expect(refund2.balance.amount).toBe('200.00');
+  });
+
+  it('rejects a second ROLLBACK targeting the same WIN', async () => {
+    const wallet = await createWallet('100.00');
+    const winExtId = uuidv4();
+
+    // WIN
+    await makeWagerUseCase().execute({
+      idempotencyKey: `provider-a:${winExtId}`,
+      providerId: 'provider-a',
+      externalTransactionId: winExtId,
+      playerId: uuidv4(),
+      walletId: wallet.id,
+      roundId: 'r1',
+      gameId: 'g1',
+      kind: WagerTransactionKind.Win,
+      money: { amount: '50.00', currency: 'BRL' },
+      correlationId: uuidv4(),
+    });
+
+    // First ROLLBACK — must succeed
+    const rb1ExtId = uuidv4();
+    const rollback1 = await makeWagerUseCase().execute({
+      idempotencyKey: `provider-a:${rb1ExtId}`,
+      providerId: 'provider-a',
+      externalTransactionId: rb1ExtId,
+      playerId: uuidv4(),
+      walletId: wallet.id,
+      roundId: 'r1',
+      gameId: 'g1',
+      kind: WagerTransactionKind.Rollback,
+      money: { amount: '50.00', currency: 'BRL' },
+      referenceExternalTransactionId: winExtId,
+      correlationId: uuidv4(),
+    });
+    expect(rollback1.status).toBe(WagerTransactionStatus.Processed);
+    expect(rollback1.balance.amount).toBe('100.00');
+
+    // Second ROLLBACK — must be rejected
+    const rb2ExtId = uuidv4();
+    const rollback2 = await makeWagerUseCase().execute({
+      idempotencyKey: `provider-a:${rb2ExtId}`,
+      providerId: 'provider-a',
+      externalTransactionId: rb2ExtId,
+      playerId: uuidv4(),
+      walletId: wallet.id,
+      roundId: 'r1',
+      gameId: 'g1',
+      kind: WagerTransactionKind.Rollback,
+      money: { amount: '50.00', currency: 'BRL' },
+      referenceExternalTransactionId: winExtId,
+      correlationId: uuidv4(),
+    });
+    expect(rollback2.status).toBe(WagerTransactionStatus.Rejected);
+    expect(rollback2.balance.amount).toBe('100.00'); // balance unchanged
+  });
+});

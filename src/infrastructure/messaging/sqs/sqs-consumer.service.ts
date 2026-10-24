@@ -15,6 +15,7 @@ import { InboxMessageRepository } from '../../database/repositories/inbox-messag
 import { InboxMessage } from '../../../domain/shared/events/inbox-message.js';
 import { WagerTransactionKind } from '../../../domain/wagering/entities/wager-transaction.enums.js';
 import { generateCanonicalPayloadHash } from '../../../shared/utils/canonical-hash.js';
+import { DomainError } from '../../../shared/errors/domain.errors.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const CONSUMER_NAME = 'wager-sqs-consumer';
@@ -215,12 +216,45 @@ export class SqsConsumerService implements OnApplicationShutdown {
         JSON.stringify({ msg: 'SQS message processed', messageId: msg.MessageId }),
       );
     } catch (err) {
-      // Business errors (terminal) — ack to avoid DLQ spam
-      // Infrastructure errors — leave in queue for retry / DLQ
-      this.logger.error(
-        JSON.stringify({ msg: 'SQS message processing failed', err: String(err) }),
-      );
-      // Message will become visible again after VisibilityTimeout
+      // Distinguish terminal business errors from transient infra errors.
+      //
+      // TERMINAL (ack immediately): domain errors mean the message payload is
+      // permanently invalid — retrying will always fail the same way, and
+      // letting it hit the DLQ wastes retries and fills the dead-letter queue
+      // with expected failures.
+      //
+      // TRANSIENT (leave in queue): infrastructure errors (DB timeout, network
+      // failure) are recoverable — SQS will retry after VisibilityTimeout, and
+      // eventually route to DLQ after maxReceiveCount.
+      const isTerminalError = err instanceof DomainError;
+
+      if (isTerminalError) {
+        this.logger.warn(
+          JSON.stringify({
+            msg: 'SQS message failed with terminal business error — acking to avoid DLQ',
+            messageId: msg.MessageId,
+            err: String(err),
+            code: (err as any).code,
+          }),
+        );
+        // ACK terminal errors — no point retrying a permanently invalid message
+        try {
+          await sqsClient.send(
+            new DeleteMessageCommand({
+              QueueUrl: this.queueUrl,
+              ReceiptHandle: receiptHandle,
+            }),
+          );
+        } catch (ackErr) {
+          this.logger.warn(`Failed to ack terminal error message: ${String(ackErr)}`);
+        }
+      } else {
+        // Transient error — leave in queue for SQS retry / DLQ
+        this.logger.error(
+          JSON.stringify({ msg: 'SQS message processing failed (transient)', err: String(err) }),
+        );
+      }
+      }
     } finally {
       this.inFlightReceiptHandle = null;
     }

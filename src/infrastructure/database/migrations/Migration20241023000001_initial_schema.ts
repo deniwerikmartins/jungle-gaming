@@ -124,8 +124,9 @@ export class Migration20241023000001 extends Migration {
         WHERE "status" IN ('PENDING', 'PENDING_REFERENCE');
     `);
     this.addSql(`
-      CREATE INDEX IF NOT EXISTS "idx_wager_created_at"
-        ON "wager_transactions" ("created_at");
+      CREATE INDEX IF NOT EXISTS "idx_wager_reference_transaction_id"
+        ON "wager_transactions" ("reference_transaction_id")
+        WHERE "reference_transaction_id" IS NOT NULL;
     `);
 
     // ------------------------------------------------------------------

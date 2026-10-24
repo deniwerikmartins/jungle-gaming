@@ -4,6 +4,7 @@ import { SendMessageCommand } from '@aws-sdk/client-sqs';
 import { EntityManager } from '@mikro-orm/postgresql';
 import { sqsClient } from '../sqs/sqs-client.provider.js';
 import { OutboxMessageOrmEntity } from '../../database/entities/outbox-message.orm-entity.js';
+import { metrics } from '../../../shared/utils/metrics.js';
 
 const BATCH_SIZE = 10;
 
@@ -95,6 +96,8 @@ export class OutboxWorkerService implements OnApplicationShutdown {
         [now, orm.id],
       );
 
+      metrics.outbox.published++;
+
       this.logger.debug(
         JSON.stringify({ msg: 'Outbox message published', id: orm.id, eventType: orm.event_type }),
       );
@@ -110,6 +113,8 @@ export class OutboxWorkerService implements OnApplicationShutdown {
         `UPDATE outbox_messages SET attempts = attempts + 1, next_attempt_at = ? WHERE id = ?`,
         [nextAttempt, orm.id],
       );
+
+      metrics.outbox.retries++;
     }
   }
 }

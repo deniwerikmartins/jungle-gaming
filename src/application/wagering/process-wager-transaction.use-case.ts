@@ -27,6 +27,7 @@ import { WagerTransactionRepository } from '../../infrastructure/database/reposi
 import { WalletLedgerEntryRepository } from '../../infrastructure/database/repositories/wallet-ledger-entry.repository.js';
 import { OutboxMessageRepository } from '../../infrastructure/database/repositories/outbox-message.repository.js';
 import { generateCanonicalPayloadHash } from '../../shared/utils/canonical-hash.js';
+import { metrics } from '../../shared/utils/metrics.js';
 
 export interface ProcessWagerTransactionInput {
   readonly idempotencyKey: string;
@@ -96,9 +97,11 @@ export class ProcessWagerTransactionUseCase {
       if (existing) {
         const payloadHash = generateCanonicalPayloadHash(this.buildHashablePayload(input));
         if (!existing.matchesPayload(payloadHash)) {
+          metrics.idempotency.conflicts++;
           throw new IdempotencyKeyReuseWithDifferentPayloadError(input.idempotencyKey);
         }
         // Idempotent replay — return stored result
+        metrics.idempotency.replays++;
         return {
           transactionId: existing.id,
           status: existing.status,
@@ -223,6 +226,7 @@ export class ProcessWagerTransactionUseCase {
           const code = this.toFailureCode(err);
           transaction.reject(code);
           await txRepo.save(transaction, input.walletId);
+          metrics.transactions.rejected++;
 
           const rejectedEvent = new WagerTransactionRejected({
             eventId: uuidv4(),
@@ -305,6 +309,8 @@ export class ProcessWagerTransactionUseCase {
       // ------------------------------------------------------------------
       await em.flush();
 
+      metrics.transactions.processed++;
+
       return {
         transactionId,
         status: WagerTransactionStatus.Processed,
@@ -360,6 +366,14 @@ export class ProcessWagerTransactionUseCase {
       kind === WagerTransactionKind.Rollback &&
       ![WagerTransactionKind.Bet, WagerTransactionKind.Win, WagerTransactionKind.Refund].includes(ref.kind)
     ) {
+      throw new ReferenceAlreadyRevertedError(referenceExternalTransactionId);
+    }
+
+    // Check not already reverted — prevent double-reversal
+    // A transaction can only be reversed once: check if a PROCESSED REFUND/ROLLBACK
+    // already targets this internal transaction ID.
+    const existingReversal = await txRepo.findProcessedReversalByReferenceId(ref.id);
+    if (existingReversal) {
       throw new ReferenceAlreadyRevertedError(referenceExternalTransactionId);
     }
 

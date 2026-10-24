@@ -4,17 +4,14 @@
   "description": "Distributed Wagering Processor — Jungle Gaming Technical Challenge",
   "private": true,
   "scripts": {
-    "build": "bun build src/main.ts --outdir dist --target bun",
-    "start": "bun run dist/main.js",
+    "start": "bun run src/main.ts",
     "start:dev": "bun run --watch src/main.ts",
     "test": "bun test",
     "test:unit": "bun test test/unit",
     "test:integration": "bun test test/integration",
-    "test:concurrency": "bun test test/concurrency",
-    "test:load": "bun run test/load/run.ts",
+    "test:concurrency": "bun test test/integration/concurrency.integration.test.ts",
     "migration:run": "bun run src/infrastructure/database/migrations/run.ts",
     "migration:revert": "bun run src/infrastructure/database/migrations/revert.ts",
-    "migration:generate": "bun run src/infrastructure/database/migrations/generate.ts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

@@ -1,4 +1,4 @@
-import { defineConfig, PostgreSqlDriver } from '@mikro-orm/postgresql';
+import { defineConfig, FlushMode, PostgreSqlDriver } from '@mikro-orm/postgresql';
 import { Migrator } from '@mikro-orm/migrations';
 import { WalletOrmEntity } from './entities/wallet.orm-entity.js';
 import { WalletLedgerEntryOrmEntity } from './entities/wallet-ledger-entry.orm-entity.js';
@@ -24,7 +24,6 @@ export default defineConfig({
 
   migrations: {
     pathTs: 'src/infrastructure/database/migrations',
-    // Only pick up files that follow the Migration naming convention
     glob: 'Migration*.{js,ts}',
     transactional: true,
     allOrNothing: true,
@@ -34,12 +33,13 @@ export default defineConfig({
   extensions: [Migrator],
 
   pool: { min: 2, max: 20 },
-  flushMode: 1, // FlushMode.COMMIT
 
-  debug: process.env['NODE_ENV'] === 'development',
+  flushMode: FlushMode.COMMIT,
+
+  debug: false,
 
   logger: (msg) => {
-    if (process.env['NODE_ENV'] !== 'test') {
+    if (process.env['NODE_ENV'] === 'development') {
       process.stdout.write(JSON.stringify({ level: 'debug', msg }) + '\n');
     }
   },

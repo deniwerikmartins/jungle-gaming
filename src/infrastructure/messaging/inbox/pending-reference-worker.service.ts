@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { Cron } from '@nestjs/schedule';
 import { EntityManager } from '@mikro-orm/postgresql';
 import { v4 as uuidv4 } from 'uuid';
 import { ProcessWagerTransactionUseCase } from '../../../application/wagering/process-wager-transaction.use-case.js';
@@ -31,7 +31,7 @@ export class PendingReferenceWorkerService {
 
   constructor(private readonly em: EntityManager) {}
 
-  @Cron(CronExpression.EVERY_30_SECONDS)
+  @Cron('*/30 * * * * *') // every 30 seconds
   async retryPendingReferences(): Promise<void> {
     try {
       const fork = this.em.fork();

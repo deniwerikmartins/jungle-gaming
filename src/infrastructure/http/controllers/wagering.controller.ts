@@ -11,7 +11,7 @@ import {
   Headers,
 } from '@nestjs/common';
 import { EntityManager } from '@mikro-orm/postgresql';
-import { FastifyRequest } from 'fastify';
+import type { FastifyRequest } from 'fastify';
 import { v4 as uuidv4 } from 'uuid';
 import { AuthGuard } from '../guards/auth.guard.js';
 import { ProcessWagerTransactionUseCase } from '../../../application/wagering/process-wager-transaction.use-case.js';

@@ -2,16 +2,18 @@
 # Jungle Gaming — Distributed Wagering Processor
 # 100% isolated: no host dependencies required.
 #
-# Dev workflow:
-#   docker compose run --rm dev bun install
-#   docker compose run --rm dev bun test
-#
 # Full stack:
 #   docker compose up --build
+#
+# Dev workflow (testes, migrations, etc.):
+#   docker compose run --rm dev bun test
+#   docker compose run --rm dev bun test test/unit
+#   docker compose run --rm dev bun test test/integration
+#   docker compose run --rm dev bun run migration:run
 # ---------------------------------------------------------------------------
 
 x-app-env: &app-env
-  NODE_ENV: development
+  NODE_ENV: production
   APP_PORT: 3000
   POSTGRES_HOST: postgres
   POSTGRES_PORT: 5432
@@ -22,6 +24,8 @@ x-app-env: &app-env
   AWS_REGION: us-east-1
   AWS_ACCESS_KEY_ID: test
   AWS_SECRET_ACCESS_KEY: test
+  LOCALSTACK_HOST: localstack
+  LOCALSTACK_PORT: 4566
   AWS_ENDPOINT_URL: http://localstack:4566
   SQS_QUEUE_URL: http://localstack:4566/000000000000/wager-transactions.fifo
   SQS_DLQ_URL: http://localstack:4566/000000000000/wager-transactions-dlq.fifo
@@ -56,10 +60,10 @@ services:
       - wagering_net
 
   # --------------------------------------------------------------------------
-  # LocalStack (SQS only)
+  # LocalStack (SQS) — pinned to 3.x community edition (no auth token needed)
   # --------------------------------------------------------------------------
   localstack:
-    image: localstack/localstack:latest
+    image: localstack/localstack:3
     restart: unless-stopped
     environment:
       SERVICES: sqs
@@ -71,26 +75,25 @@ services:
     volumes:
       - localstack_data:/var/lib/localstack
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/health | grep -q '\"sqs\": \"available\"'"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/health | grep -q '\"sqs\"'"]
       interval: 5s
       timeout: 5s
       retries: 20
-      start_period: 15s
+      start_period: 20s
     networks:
       - wagering_net
 
   # --------------------------------------------------------------------------
-  # Application (NestJS + Bun) — production/staging
+  # Application (NestJS + Bun)
+  # Bun transpiles TypeScript at runtime — no build step needed.
   # --------------------------------------------------------------------------
   app:
     build:
       context: .
       dockerfile: Dockerfile
-      target: runner
     restart: unless-stopped
     environment:
       <<: *app-env
-      NODE_ENV: production
     ports:
       - "3000:3000"
     depends_on:
@@ -102,23 +105,25 @@ services:
       - wagering_net
 
   # --------------------------------------------------------------------------
-  # Dev service — Bun isolated for local development and testing.
-  # Mounts the project directory as a volume so code changes are reflected
-  # immediately without rebuilding the image.
+  # Dev service — on-demand only (excluded from `docker compose up`).
+  # Uses profiles so it never starts automatically.
   #
   # Usage:
   #   docker compose run --rm dev bun install
   #   docker compose run --rm dev bun test
   #   docker compose run --rm dev bun test test/unit
-  #   docker compose run --rm dev bun run lint
+  #   docker compose run --rm dev bun test test/integration
   # --------------------------------------------------------------------------
   dev:
     image: oven/bun:1-alpine
     working_dir: /app
+    profiles:
+      - tools
     volumes:
       - .:/app
     environment:
       <<: *app-env
+      NODE_ENV: development
     networks:
       - wagering_net
 

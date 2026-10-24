@@ -1,6 +1,9 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
+import {
+  FastifyAdapter,
+  NestFastifyApplication,
+} from '@nestjs/platform-fastify';
 import { AppModule } from './app.module.js';
 
 async function bootstrap(): Promise<void> {
@@ -10,8 +13,6 @@ async function bootstrap(): Promise<void> {
     { bufferLogs: true },
   );
 
-  // Graceful shutdown: handle SIGTERM and SIGINT
-  // Workers and SQS consumers check this flag before polling
   app.enableShutdownHooks();
 
   const port = Number(process.env['APP_PORT'] ?? 3000);
@@ -23,8 +24,15 @@ async function bootstrap(): Promise<void> {
 }
 
 bootstrap().catch((err) => {
+  // Log full error details for debugging
   process.stderr.write(
-    JSON.stringify({ level: 'fatal', msg: 'Bootstrap failed', error: String(err) }) + '\n',
+    JSON.stringify({
+      level: 'fatal',
+      msg: 'Bootstrap failed',
+      error: String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+      cause: err instanceof Error && err.cause ? String(err.cause) : undefined,
+    }) + '\n',
   );
   process.exit(1);
 });

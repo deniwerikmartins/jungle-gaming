@@ -13,6 +13,7 @@ AWS_ENDPOINT="http://${LOCALSTACK_HOST}:${LOCALSTACK_PORT}"
 
 SQS_QUEUE_NAME="wager-transactions.fifo"
 SQS_DLQ_NAME="wager-transactions-dlq.fifo"
+SQS_EVENTS_NAME="wager-events.fifo"
 
 wait_tcp() {
   local host="$1" port="$2" label="$3"
@@ -105,6 +106,17 @@ echo "[entrypoint] Queue URL: ${QUEUE_URL}"
 # Export real URLs for the application
 export SQS_QUEUE_URL="${QUEUE_URL}"
 export SQS_DLQ_URL="${DLQ_URL}"
+
+# Create events output queue (Outbox publishes here — separate from input queue)
+EVENTS_URL=$(aws sqs create-queue \
+  --queue-name "${SQS_EVENTS_NAME}" \
+  --attributes FifoQueue=true,ContentBasedDeduplication=true \
+  --region "${AWS_REGION}" \
+  --endpoint-url "${AWS_ENDPOINT}" \
+  --query 'QueueUrl' --output text)
+
+echo "[entrypoint] Events queue URL: ${EVENTS_URL}"
+export SQS_EVENTS_URL="${EVENTS_URL}"
 
 # ---------------------------------------------------------------------------
 # 5. Start app

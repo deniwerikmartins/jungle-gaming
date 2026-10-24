@@ -17,6 +17,7 @@ export class OutboxWorkerService implements OnApplicationShutdown {
   private shuttingDown = false;
 
   private readonly queueUrl =
+    process.env['SQS_EVENTS_URL'] ??
     process.env['SQS_QUEUE_URL'] ??
     'http://localstack:4566/000000000000/wager-transactions.fifo';
 

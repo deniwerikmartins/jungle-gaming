@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "jungle-gaming-wagering-v1",
     "name": "Jungle Gaming — Distributed Wagering Processor",
-    "description": "Collection completa para testar a API do Distributed Wagering Processor.\n\n**Fluxo recomendado:**\n1. Health Check\n2. Criar Wallet\n3. BET → WIN → LOSS\n4. REFUND de BET\n5. ROLLBACK de WIN\n6. Idempotência\n7. Saldo insuficiente\n8. Reconciliação\n9. Extrato (ledger)\n\n**Variáveis de ambiente necessárias:**\n- `baseUrl`: http://localhost:3000\n- `walletId`: preenchido automaticamente após criar wallet\n- `betExtId`: preenchido automaticamente após criar BET",
+    "description": "# Distributed Wagering Processor — Guia de Testes\n\n## Como usar\n1. Importe esta collection no Postman\n2. Garanta que `baseUrl` aponta para `http://localhost:3000`\n3. Execute os requests **na ordem das pastas** — as variáveis (`walletId`, `betExtId`, etc.) são preenchidas automaticamente pelos scripts de teste\n\n## Legenda de resultados esperados\n\n✅ **SUCESSO** — HTTP 2xx. Operação realizada conforme esperado.\n\n❌ **ERRO ESPERADO** — HTTP 4xx/5xx. A API está aplicando uma regra de negócio ou validação. O erro **não indica bug** — indica que o sistema está funcionando corretamente ao rejeitar uma operação inválida.\n\n## Ordem de execução recomendada\n1. Health → 2. Wallet → 3. Transações (em ordem) → 4. Extrato e Reconciliação",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -17,9 +17,11 @@
   "item": [
     {
       "name": "1. Health",
+      "description": "Endpoints de saúde do sistema. Não requerem autenticação. Sempre devem retornar 200 enquanto a aplicação estiver rodando.",
       "item": [
         {
-          "name": "Liveness",
+          "name": "✅ Liveness — processo vivo",
+          "description": "**Resultado esperado: 200 OK**\n\nVerifica apenas se o processo NestJS está respondendo. Não checa banco ou SQS.\n\n**Regra:** Se este endpoint falhar, o processo travou e precisa ser reiniciado.",
           "request": {
             "method": "GET",
             "header": [],
@@ -30,15 +32,16 @@
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "pm.test('status ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                  "pm.test('✅ 200 OK — processo está vivo', () => pm.response.to.have.status(200));",
+                  "pm.test('status = ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Readiness",
+          "name": "✅ Readiness — banco conectado",
+          "description": "**Resultado esperado: 200 OK**\n\nVerifica conectividade com o PostgreSQL. Usado pelo orquestrador para saber se a aplicação está pronta para receber tráfego.\n\n**Regra:** Se este endpoint falhar, o banco não está acessível. Cheque se `jungle-gaming-postgres-1` está healthy.",
           "request": {
             "method": "GET",
             "header": [],
@@ -49,8 +52,8 @@
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "pm.test('db ok', () => pm.expect(pm.response.json().db).to.eql('ok'));"
+                  "pm.test('✅ 200 OK — aplicação pronta', () => pm.response.to.have.status(200));",
+                  "pm.test('db = ok', () => pm.expect(pm.response.json().db).to.eql('ok'));"
                 ]
               }
             }
@@ -60,9 +63,11 @@
     },
     {
       "name": "2. Wallet",
+      "description": "Operações de criação e consulta de wallets.",
       "item": [
         {
-          "name": "Criar Wallet (saldo inicial 1000.00)",
+          "name": "✅ Criar Wallet — saldo inicial 1000.00",
+          "description": "**Resultado esperado: 201 Created**\n\nCria uma nova wallet com saldo inicial de 1000.00 BRL. Internamente:\n- Gera um UUID para a wallet\n- Cria uma transação interna `OPENING` no ledger (crédito de 1000.00)\n- version = 1 (porque o saldo foi movido uma vez)\n\n**Pós-execução:** `walletId` e `playerId` são salvos automaticamente como variáveis da collection para uso nos próximos requests.",
           "event": [
             {
               "listen": "prerequest",
@@ -74,12 +79,14 @@
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('✅ 201 Created', () => pm.response.to.have.status(201));",
                   "const body = pm.response.json();",
-                  "pm.test('balance 1000.00', () => pm.expect(body.balance.amount).to.eql('1000.00'));",
-                  "pm.test('version 1', () => pm.expect(body.version).to.eql(1));",
+                  "pm.test('balance = 1000.00 BRL', () => pm.expect(body.balance.amount).to.eql('1000.00'));",
+                  "pm.test('currency = BRL', () => pm.expect(body.balance.currency).to.eql('BRL'));",
+                  "pm.test('version = 1 (saldo foi movido pelo OPENING)', () => pm.expect(body.version).to.eql(1));",
+                  "pm.test('id gerado', () => pm.expect(body.id).to.be.a('string'));",
                   "pm.collectionVariables.set('walletId', body.id);",
-                  "console.log('walletId set to:', body.id);"
+                  "console.log('walletId salvo:', body.id);"
                 ]
               }
             }
@@ -95,14 +102,15 @@
           }
         },
         {
-          "name": "Criar Wallet duplicada → 409",
+          "name": "❌ Criar Wallet duplicada — mesmo playerId + moeda",
+          "description": "**Resultado esperado: 409 Conflict**\n\n**Por que falha:** O sistema permite no máximo uma wallet por `playerId + currency`. Tentar criar uma segunda wallet BRL para o mesmo jogador viola esta invariante de negócio.\n\n**Regra aplicada:** Unique constraint em `(player_id, currency)` no schema do PostgreSQL + validação no use case.\n\n**Código de erro:** `WALLET_ALREADY_EXISTS`\n\n**Ação esperada do cliente:** Não reenviar. Consultar a wallet existente via `GET /wallets/:walletId`.",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status 409', () => pm.response.to.have.status(409));",
-                  "pm.test('code WALLET_ALREADY_EXISTS', () => pm.expect(pm.response.json().code).to.eql('WALLET_ALREADY_EXISTS'));"
+                  "pm.test('❌ 409 Conflict — wallet duplicada é rejeitada corretamente', () => pm.response.to.have.status(409));",
+                  "pm.test('code = WALLET_ALREADY_EXISTS', () => pm.expect(pm.response.json().code).to.eql('WALLET_ALREADY_EXISTS'));"
                 ]
               }
             }
@@ -118,14 +126,16 @@
           }
         },
         {
-          "name": "Consultar Wallet",
+          "name": "✅ Consultar Wallet existente",
+          "description": "**Resultado esperado: 200 OK**\n\nRetorna o saldo atual e versão da wallet criada anteriormente.\n\n**Nota:** O saldo deve ser 1000.00 BRL e version = 1 (nenhuma transação foi feita ainda além do OPENING).",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "pm.test('has balance', () => pm.expect(pm.response.json().balance).to.be.an('object'));"
+                  "pm.test('✅ 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('tem balance', () => pm.expect(pm.response.json().balance).to.be.an('object'));",
+                  "pm.test('balance = 1000.00', () => pm.expect(pm.response.json().balance.amount).to.eql('1000.00'));"
                 ]
               }
             }
@@ -137,12 +147,16 @@
           }
         },
         {
-          "name": "Consultar Wallet inexistente → 404",
+          "name": "❌ Consultar Wallet inexistente — UUID inválido",
+          "description": "**Resultado esperado: 404 Not Found**\n\n**Por que falha:** O UUID `00000000-0000-0000-0000-000000000000` não existe no banco.\n\n**Regra aplicada:** O sistema retorna 404 para recursos não encontrados, nunca retorna dados de outra wallet.\n\n**Código de erro:** `WALLET_NOT_FOUND`\n\n**Ação esperada do cliente:** Verificar se o `walletId` está correto antes de reenviar.",
           "event": [
             {
               "listen": "test",
               "script": {
-                "exec": ["pm.test('Status 404', () => pm.response.to.have.status(404));"]
+                "exec": [
+                  "pm.test('❌ 404 Not Found — wallet inexistente rejeitada corretamente', () => pm.response.to.have.status(404));",
+                  "pm.test('code = WALLET_NOT_FOUND', () => pm.expect(pm.response.json().code).to.eql('WALLET_NOT_FOUND'));"
+                ]
               }
             }
           ],
@@ -156,9 +170,11 @@
     },
     {
       "name": "3. Transações",
+      "description": "# Operações de apostas\n\n## Fluxo normal (executa em ordem)\n1. BET → debita saldo\n2. BET replay idempotente → retorna mesmo resultado\n3. WIN → credita saldo\n4. LOSS → registra resultado sem mover saldo\n5. REFUND → estorna o BET\n6. ROLLBACK → desfaz o WIN\n\n## Casos de erro (testam regras de negócio)\n7. BET saldo insuficiente → REJECTED\n8. Conflito de idempotência → 409\n9. REFUND com referência ausente → PENDING_REFERENCE\n10. Sem Idempotency-Key → 400",
       "item": [
         {
-          "name": "BET — 25.00 BRL",
+          "name": "✅ BET — debita 25.00 BRL",
+          "description": "**Resultado esperado: 200 OK, status = PROCESSED**\n\nApostar 25.00 BRL. O sistema:\n1. Bloqueia a wallet com `SELECT FOR UPDATE` (pessimistic locking)\n2. Verifica se o saldo é suficiente (1000.00 >= 25.00 ✓)\n3. Debita 25.00 do saldo → novo saldo: 975.00\n4. Cria entrada DEBIT no ledger\n5. Registra transação como PROCESSED\n6. Enfileira evento `WalletBalanceChanged` + `WagerTransactionProcessed` no Outbox\n7. Confirma tudo em uma única transação SQL atômica\n\n**Pós-execução:** `betExtId` e `idempotencyKey` salvos para os próximos requests.",
           "event": [
             {
               "listen": "prerequest",
@@ -174,11 +190,12 @@
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('✅ 200 OK', () => pm.response.to.have.status(200));",
                   "const body = pm.response.json();",
-                  "pm.test('PROCESSED', () => pm.expect(body.status).to.eql('PROCESSED'));",
-                  "pm.test('balance reduced', () => pm.expect(body.balance.amount).to.eql('975.00'));",
-                  "pm.test('not replay', () => pm.expect(body.idempotentReplay).to.be.false);"
+                  "pm.test('status = PROCESSED', () => pm.expect(body.status).to.eql('PROCESSED'));",
+                  "pm.test('balance = 975.00 (1000 - 25)', () => pm.expect(body.balance.amount).to.eql('975.00'));",
+                  "pm.test('não é replay', () => pm.expect(body.idempotentReplay).to.be.false);",
+                  "pm.test('transactionId gerado', () => pm.expect(body.transactionId).to.be.a('string'));"
                 ]
               }
             }
@@ -197,14 +214,17 @@
           }
         },
         {
-          "name": "BET — replay idempotente → idempotentReplay: true",
+          "name": "✅ BET — replay idempotente (mesma requisição)",
+          "description": "**Resultado esperado: 200 OK, idempotentReplay = true**\n\nEnvia exatamente o mesmo request do BET anterior (mesma `Idempotency-Key` e mesmo payload). O sistema:\n1. Encontra a transação já processada pela `idempotencyKey`\n2. Verifica que o hash do payload é idêntico (confirma que é replay legítimo)\n3. Retorna o resultado original **sem modificar o banco**\n\n**Por que isso importa:** Garante que retentativas de rede não causam débito duplo.\n\n**Resultado:** saldo continua 975.00, `idempotentReplay = true`.",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "pm.test('is replay', () => pm.expect(pm.response.json().idempotentReplay).to.be.true);"
+                  "pm.test('✅ 200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('idempotentReplay = true — sistema reconheceu o replay', () => pm.expect(body.idempotentReplay).to.be.true);",
+                  "pm.test('balance ainda 975.00 — saldo não foi debitado duas vezes', () => pm.expect(body.balance.amount).to.eql('975.00'));"
                 ]
               }
             }
@@ -223,7 +243,8 @@
           }
         },
         {
-          "name": "WIN — 50.00 BRL",
+          "name": "✅ WIN — credita 50.00 BRL",
+          "description": "**Resultado esperado: 200 OK, status = PROCESSED**\n\nO jogador ganhou 50.00 BRL. O sistema:\n1. Credita 50.00 ao saldo → novo saldo: 1025.00 (975 + 50)\n2. Cria entrada CREDIT no ledger\n3. Registra como PROCESSED\n\n**Pós-execução:** `winExtId` salvo para o ROLLBACK posterior.",
           "event": [
             {
               "listen": "prerequest",
@@ -238,9 +259,9 @@
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "pm.test('PROCESSED', () => pm.expect(pm.response.json().status).to.eql('PROCESSED'));",
-                  "pm.test('balance 1025.00', () => pm.expect(pm.response.json().balance.amount).to.eql('1025.00'));"
+                  "pm.test('✅ 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('status = PROCESSED', () => pm.expect(pm.response.json().status).to.eql('PROCESSED'));",
+                  "pm.test('balance = 1025.00 (975 + 50)', () => pm.expect(pm.response.json().balance.amount).to.eql('1025.00'));"
                 ]
               }
             }
@@ -259,15 +280,16 @@
           }
         },
         {
-          "name": "LOSS — 25.00 BRL (saldo não muda)",
+          "name": "✅ LOSS — registra sem alterar saldo",
+          "description": "**Resultado esperado: 200 OK, status = PROCESSED, saldo inalterado**\n\nO jogador perdeu uma rodada. LOSS é um resultado de auditoria — registra que a rodada terminou em derrota sem mover dinheiro (o BET já debitou no início da rodada).\n\n**Regra:** LOSS não gera entrada no ledger nem altera saldo.\n\n**Resultado:** status = PROCESSED, balance = 1025.00 (inalterado).",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "pm.test('PROCESSED', () => pm.expect(pm.response.json().status).to.eql('PROCESSED'));",
-                  "pm.test('balance unchanged 1025.00', () => pm.expect(pm.response.json().balance.amount).to.eql('1025.00'));"
+                  "pm.test('✅ 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('status = PROCESSED', () => pm.expect(pm.response.json().status).to.eql('PROCESSED'));",
+                  "pm.test('balance = 1025.00 — LOSS não altera saldo', () => pm.expect(pm.response.json().balance.amount).to.eql('1025.00'));"
                 ]
               }
             }
@@ -280,13 +302,14 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"providerId\": \"provider-a\",\n  \"externalTransactionId\": \"loss-{{$randomUUID}}\",\n  \"playerId\": \"{{playerId}}\",\n  \"walletId\": \"{{walletId}}\",\n  \"roundId\": \"round-1\",\n  \"gameId\": \"fortune-chimp\",\n  \"kind\": \"LOSS\",\n  \"money\": { \"amount\": \"25.00\", \"currency\": \"BRL\" }\n}"
+              "raw": "{\n  \"providerId\": \"provider-a\",\n  \"externalTransactionId\": \"loss-{{$randomUUID}}\",\n  \"playerId\": \"{{playerId}}\",\n  \"walletId\": \"{{walletId}}\",\n  \"roundId\": \"round-2\",\n  \"gameId\": \"fortune-chimp\",\n  \"kind\": \"LOSS\",\n  \"money\": { \"amount\": \"25.00\", \"currency\": \"BRL\" }\n}"
             },
             "url": { "raw": "{{baseUrl}}/wagering/transactions", "host": ["{{baseUrl}}"], "path": ["wagering", "transactions"] }
           }
         },
         {
-          "name": "REFUND do BET",
+          "name": "✅ REFUND — estorna o BET de 25.00",
+          "description": "**Resultado esperado: 200 OK, status = PROCESSED**\n\nEstorna o BET original de 25.00. O sistema:\n1. Resolve a referência `betExtId` → encontra a transação BET PROCESSED\n2. Credita 25.00 de volta → novo saldo: 1050.00 (1025 + 25)\n3. Cria entrada CREDIT no ledger\n\n**Regra:** REFUND só pode reverter um BET. Não pode reverter duas vezes o mesmo BET.\n\n**Pós-execução:** `refundExtId` salvo.",
           "event": [
             {
               "listen": "prerequest",
@@ -301,9 +324,9 @@
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "pm.test('PROCESSED', () => pm.expect(pm.response.json().status).to.eql('PROCESSED'));",
-                  "pm.test('balance restored +25', () => pm.expect(pm.response.json().balance.amount).to.eql('1050.00'));"
+                  "pm.test('✅ 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('status = PROCESSED', () => pm.expect(pm.response.json().status).to.eql('PROCESSED'));",
+                  "pm.test('balance = 1050.00 (1025 + 25 estornado)', () => pm.expect(pm.response.json().balance.amount).to.eql('1050.00'));"
                 ]
               }
             }
@@ -322,15 +345,16 @@
           }
         },
         {
-          "name": "ROLLBACK do WIN",
+          "name": "✅ ROLLBACK — desfaz o WIN de 50.00",
+          "description": "**Resultado esperado: 200 OK, status = PROCESSED**\n\nDesfaz o WIN de 50.00. O sistema:\n1. Resolve a referência `winExtId` → encontra a transação WIN PROCESSED\n2. WIN foi um CREDIT, então ROLLBACK faz DEBIT → debita 50.00\n3. Novo saldo: 1000.00 (1050 - 50)\n\n**Regra:** ROLLBACK inverte a direção da transação referenciada. Pode reverter BET, WIN ou REFUND.",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "pm.test('PROCESSED', () => pm.expect(pm.response.json().status).to.eql('PROCESSED'));",
-                  "pm.test('balance -50 from WIN rollback', () => pm.expect(pm.response.json().balance.amount).to.eql('1000.00'));"
+                  "pm.test('✅ 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('status = PROCESSED', () => pm.expect(pm.response.json().status).to.eql('PROCESSED'));",
+                  "pm.test('balance = 1000.00 (WIN revertido)', () => pm.expect(pm.response.json().balance.amount).to.eql('1000.00'));"
                 ]
               }
             }
@@ -349,14 +373,17 @@
           }
         },
         {
-          "name": "BET saldo insuficiente → 422",
+          "name": "⚠️ BET — saldo insuficiente (REJECTED na camada de negócio)",
+          "description": "**Resultado esperado: 200 OK, status = REJECTED**\n\n**Atenção:** Este request retorna HTTP 200 mas com `status = REJECTED`. Isso é intencional.\n\n**Por que 200 e não 422?** A transação foi recebida, processada e tem um resultado definitivo (REJECTED). O HTTP 200 indica que a requisição foi processada com sucesso — o resultado de negócio é que foi rejeitada. O provider recebe um `failureCode` estável para decidir o que fazer.\n\n**Regra aplicada:** Invariante de saldo não-negativo. O wallet tem 1000.00 BRL, a aposta é de 99999.00 BRL — impossível.\n\n**failureCode:** `INSUFFICIENT_FUNDS`\n\n**Ação esperada do cliente:** Não reenviar. O saldo é insuficiente — corrija o valor ou recarregue a wallet.",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status 200 (REJECTED)', () => pm.response.to.have.status(200));",
-                  "pm.test('REJECTED', () => pm.expect(pm.response.json().status).to.eql('REJECTED'));"
+                  "pm.test('✅ 200 OK (transação processada com resultado REJECTED)', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('status = REJECTED — saldo insuficiente', () => pm.expect(body.status).to.eql('REJECTED'));",
+                  "pm.test('saldo inalterado', () => pm.expect(body.balance.amount).to.eql('1000.00'));"
                 ]
               }
             }
@@ -369,18 +396,22 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"providerId\": \"provider-a\",\n  \"externalTransactionId\": \"insuf-bet\",\n  \"playerId\": \"{{playerId}}\",\n  \"walletId\": \"{{walletId}}\",\n  \"roundId\": \"round-2\",\n  \"gameId\": \"fortune-chimp\",\n  \"kind\": \"BET\",\n  \"money\": { \"amount\": \"99999.00\", \"currency\": \"BRL\" }\n}"
+              "raw": "{\n  \"providerId\": \"provider-a\",\n  \"externalTransactionId\": \"insuf-bet-{{$randomUUID}}\",\n  \"playerId\": \"{{playerId}}\",\n  \"walletId\": \"{{walletId}}\",\n  \"roundId\": \"round-3\",\n  \"gameId\": \"fortune-chimp\",\n  \"kind\": \"BET\",\n  \"money\": { \"amount\": \"99999.00\", \"currency\": \"BRL\" }\n}"
             },
             "url": { "raw": "{{baseUrl}}/wagering/transactions", "host": ["{{baseUrl}}"], "path": ["wagering", "transactions"] }
           }
         },
         {
-          "name": "Conflito de idempotência → 409",
+          "name": "❌ Conflito de idempotência — mesma key, payload diferente",
+          "description": "**Resultado esperado: 409 Conflict**\n\n**Por que falha:** A `Idempotency-Key` do BET original está sendo reutilizada com um valor diferente (99.00 em vez de 25.00).\n\n**Regra aplicada:** A mesma `Idempotency-Key` com payload diferente é um conflito — não é replay, é uma tentativa de fraude ou erro do cliente. O sistema rejeita com 409 para forçar o provider a usar uma nova chave.\n\n**Código de erro:** `IDEMPOTENCY_KEY_REUSE_WITH_DIFFERENT_PAYLOAD`\n\n**Ação esperada do cliente:** Gerar uma nova `Idempotency-Key` para esta transação. Nunca reutilizar a mesma chave com dados diferentes.",
           "event": [
             {
               "listen": "test",
               "script": {
-                "exec": ["pm.test('Status 409', () => pm.response.to.have.status(409));"]
+                "exec": [
+                  "pm.test('❌ 409 Conflict — conflito de idempotência detectado corretamente', () => pm.response.to.have.status(409));",
+                  "pm.test('code = IDEMPOTENCY_KEY_REUSE_WITH_DIFFERENT_PAYLOAD', () => pm.expect(pm.response.json().code).to.eql('IDEMPOTENCY_KEY_REUSE_WITH_DIFFERENT_PAYLOAD'));"
+                ]
               }
             }
           ],
@@ -398,14 +429,16 @@
           }
         },
         {
-          "name": "REFUND sem referência → PENDING_REFERENCE",
+          "name": "⚠️ REFUND — referência inexistente (PENDING_REFERENCE)",
+          "description": "**Resultado esperado: 200 OK, status = PENDING_REFERENCE**\n\n**O que acontece:** O REFUND referencia um BET que não existe no sistema (ainda). Isso simula entrega fora de ordem — o REFUND chegou antes do BET ser processado.\n\n**Regra aplicada:** Em vez de rejeitar, o sistema persiste a transação como `PENDING_REFERENCE` e agenda reprocessamento automático (worker roda a cada 30s, até 5 tentativas).\n\n**Por que não rejeitar imediatamente?** Em sistemas distribuídos com `at-least-once delivery`, mensagens podem chegar fora de ordem. O PENDING_REFERENCE permite que o sistema se auto-corrija.\n\n**Resultado:** HTTP 200, `status = PENDING_REFERENCE`, saldo inalterado.",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "pm.test('PENDING_REFERENCE', () => pm.expect(pm.response.json().status).to.eql('PENDING_REFERENCE'));"
+                  "pm.test('✅ 200 OK (aceito para processamento futuro)', () => pm.response.to.have.status(200));",
+                  "pm.test('status = PENDING_REFERENCE — aguardando referência', () => pm.expect(pm.response.json().status).to.eql('PENDING_REFERENCE'));",
+                  "pm.test('saldo inalterado', () => pm.expect(pm.response.json().balance.amount).to.eql('1000.00'));"
                 ]
               }
             }
@@ -418,18 +451,22 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"providerId\": \"provider-a\",\n  \"externalTransactionId\": \"refund-pending-test\",\n  \"playerId\": \"{{playerId}}\",\n  \"walletId\": \"{{walletId}}\",\n  \"roundId\": \"round-3\",\n  \"gameId\": \"fortune-chimp\",\n  \"kind\": \"REFUND\",\n  \"money\": { \"amount\": \"10.00\", \"currency\": \"BRL\" },\n  \"referenceExternalTransactionId\": \"nonexistent-bet-xyz\"\n}"
+              "raw": "{\n  \"providerId\": \"provider-a\",\n  \"externalTransactionId\": \"refund-pending-test-{{$randomUUID}}\",\n  \"playerId\": \"{{playerId}}\",\n  \"walletId\": \"{{walletId}}\",\n  \"roundId\": \"round-4\",\n  \"gameId\": \"fortune-chimp\",\n  \"kind\": \"REFUND\",\n  \"money\": { \"amount\": \"10.00\", \"currency\": \"BRL\" },\n  \"referenceExternalTransactionId\": \"bet-that-does-not-exist-yet\"\n}"
             },
             "url": { "raw": "{{baseUrl}}/wagering/transactions", "host": ["{{baseUrl}}"], "path": ["wagering", "transactions"] }
           }
         },
         {
-          "name": "Sem Idempotency-Key → 400",
+          "name": "❌ Sem Idempotency-Key — header obrigatório ausente",
+          "description": "**Resultado esperado: 400 Bad Request**\n\n**Por que falha:** O header `Idempotency-Key` é obrigatório em todos os requests de transação. Sem ele, não é possível garantir idempotência e o sistema recusa a operação.\n\n**Regra aplicada:** Validação de entrada — a ausência do header é um erro do cliente, não do servidor.\n\n**Código de erro:** `INVALID_PAYLOAD`\n\n**Ação esperada do cliente:** Adicionar o header `Idempotency-Key` com um valor único (ex: `{providerId}:{externalTransactionId}`).",
           "event": [
             {
               "listen": "test",
               "script": {
-                "exec": ["pm.test('Status 400', () => pm.response.to.have.status(400));"]
+                "exec": [
+                  "pm.test('❌ 400 Bad Request — header obrigatório ausente detectado corretamente', () => pm.response.to.have.status(400));",
+                  "pm.test('code = INVALID_PAYLOAD', () => pm.expect(pm.response.json().code).to.eql('INVALID_PAYLOAD'));"
+                ]
               }
             }
           ],
@@ -438,7 +475,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"providerId\": \"provider-a\",\n  \"externalTransactionId\": \"no-key\",\n  \"playerId\": \"{{playerId}}\",\n  \"walletId\": \"{{walletId}}\",\n  \"roundId\": \"r1\",\n  \"gameId\": \"g1\",\n  \"kind\": \"BET\",\n  \"money\": { \"amount\": \"10.00\", \"currency\": \"BRL\" }\n}"
+              "raw": "{\n  \"providerId\": \"provider-a\",\n  \"externalTransactionId\": \"no-key-test\",\n  \"playerId\": \"{{playerId}}\",\n  \"walletId\": \"{{walletId}}\",\n  \"roundId\": \"round-5\",\n  \"gameId\": \"fortune-chimp\",\n  \"kind\": \"BET\",\n  \"money\": { \"amount\": \"10.00\", \"currency\": \"BRL\" }\n}"
             },
             "url": { "raw": "{{baseUrl}}/wagering/transactions", "host": ["{{baseUrl}}"], "path": ["wagering", "transactions"] }
           }
@@ -447,16 +484,20 @@
     },
     {
       "name": "4. Extrato e Reconciliação",
+      "description": "Auditoria do histórico de movimentações e verificação de consistência do saldo.",
       "item": [
         {
-          "name": "Extrato (ledger paginado)",
+          "name": "✅ Extrato (ledger paginado)",
+          "description": "**Resultado esperado: 200 OK**\n\nRetorna todas as entradas do ledger para a wallet, em ordem cronológica decrescente.\n\nCada entrada contém:\n- `direction`: DEBIT ou CREDIT\n- `money`: valor movimentado\n- `balanceBefore` / `balanceAfter`: rastreabilidade completa\n- `transactionId`: qual transação gerou esta entrada\n\n**Nota:** LOSS e transações REJECTED não geram entradas no ledger — apenas movimentações reais de saldo aparecem aqui.\n\n**Paginação:** Use `cursor` retornado em `nextCursor` para buscar páginas seguintes.",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "pm.test('has items', () => pm.expect(pm.response.json().items).to.be.an('array'));"
+                  "pm.test('✅ 200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('tem items', () => pm.expect(body.items).to.be.an('array'));",
+                  "pm.test('cada item tem direction', () => body.items.forEach(i => pm.expect(i.direction).to.be.oneOf(['DEBIT', 'CREDIT'])));"
                 ]
               }
             }
@@ -473,16 +514,18 @@
           }
         },
         {
-          "name": "Reconciliação",
+          "name": "✅ Reconciliação — saldo armazenado === saldo calculado",
+          "description": "**Resultado esperado: 200 OK, consistent = true, difference = 0.00**\n\nVerifica a integridade financeira da wallet comparando:\n- `storedBalance`: saldo atual na tabela `wallets`\n- `calculatedBalance`: soma de todos os CREDIT menos todos os DEBIT no ledger\n\n**Se `consistent = true`:** o sistema está íntegro — não houve perdas, duplicações ou inconsistências.\n\n**Se `consistent = false`:** divergência detectada — o sistema **não corrige silenciosamente**, apenas registra em log e retorna o diagnóstico. Isso indica um bug grave e deve ser investigado.\n\n**Invariante:** `wallet.balance === ledger_credits - ledger_debits` deve ser sempre verdadeiro.",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('✅ 200 OK', () => pm.response.to.have.status(200));",
                   "const body = pm.response.json();",
-                  "pm.test('consistent', () => pm.expect(body.consistent).to.be.true);",
-                  "pm.test('difference zero', () => pm.expect(body.difference.amount).to.eql('0.00'));"
+                  "pm.test('consistent = true — saldo íntegro', () => pm.expect(body.consistent).to.be.true);",
+                  "pm.test('difference = 0.00 — sem divergência', () => pm.expect(body.difference.amount).to.eql('0.00'));",
+                  "pm.test('storedBalance === calculatedBalance', () => pm.expect(body.storedBalance.amount).to.eql(body.calculatedBalance.amount));"
                 ]
               }
             }
